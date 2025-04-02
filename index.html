@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>3D AI Agent Concept</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      height: 98vh;
+      justify-content: flex-end;
+      text-align: center;
+      background-color: #202020;
+      color: white; 
+    }
+    #avatar {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+    .input-text {
+      position: absolute;
+      bottom: 70px; /* Positioned slightly above the input box */
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 1.2em;
+      background-color: rgba(211, 211, 211, 0.3); /* Optional background */
+      padding: 5px;
+      border-radius: 5px;
+      white-space: normal; /* Allows text wrapping */
+      width: calc(100% - 40px); /* Ensures the text stays within the screen */
+      max-height: 80%; /* Prevents the text box from taking up too much space */
+      overflow-y: auto; /* Adds scrolling if text exceeds the max height */
+    }
+    .input-area {
+      display: flex;
+      padding: 20px;
+      justify-content: center;
+      align-items: center;
+      position: relative;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 10px;
+      font-size: 1em;
+      border: 1px solid #ccc;
+      border-radius: 5px 0 0 5px;
+    }
+    button {
+      padding: 10px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 0 5px 5px 0;
+      font-size: 1em;
+    }
+    button:hover {
+      background-color: #0056b3;
+  </style>
+
+  <script type="importmap">
+  { "imports":
+    {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js/+esm",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "talkinghead": "https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.3/modules/talkinghead.mjs"
+    }
+  }
+  </script>
+  <script src="res/aforce.js"></script>
+
+  <script type="module">
+    import { TalkingHead } from "talkinghead";
+
+    let head;
+
+    var uuid = "";
+    var token = "";
+    var sessionId = "";
+    var seqId = 0;
+    const goButton = document.getElementById("go");
+    const replyInput = document.getElementById("reply");
+    const ttsUrl = getTtsUrl();
+    const makeUrl = "https://hook.eu2.make.com/6hmxy92flnfgwromedcqga1glafcldux";
+    // const makeUrl = "http://localhost";
+
+  document.addEventListener('DOMContentLoaded', async function(e) {
+
+      // Instantiate the class
+      // NOTE: Never put your API key in a client-side code unless you know
+      //       that you are the only one to have access to that code!
+      const nodeAvatar = document.getElementById('avatar');
+      head = new TalkingHead( nodeAvatar, {
+        ttsEndpoint: "https://eu-texttospeech.googleapis.com/v1beta1/text:synthesize",
+        ttsApikey: `${ttsUrl}`,
+        lipsyncModules: ["en", "fi"],
+        cameraView: "upper"
+      });
+
+      // Load and show the avatar
+      const nodeLoading = document.getElementById('loading');
+      try {
+        nodeLoading.textContent = "Loading...";
+        await head.showAvatar( {
+          url: 'https://models.readyplayer.me/67eaaa7b721ff045accba026.glb?morphTargets=ARKit,Oculus+Visemes,mouthOpen,mouthSmile,eyesClosed,eyesLookUp,eyesLookDown&textureSizeLimit=1024&textureFormat=png',
+          body: 'F',
+          avatarMood: 'happy',
+          ttsLang: "en-US",
+          ttsVoice: "en-US-Standard-C",
+          lipsyncLang: 'en'
+        }, (ev) => {
+          if ( ev.lengthComputable ) {
+            let val = Math.min(100,Math.round(ev.loaded/ev.total * 100 ));
+            nodeLoading.textContent = "Loading " + val + "%";
+          }
+        });
+	nodeLoading.textContent = "";
+
+      } catch (error) {
+        console.log(error);
+        nodeLoading.textContent = error.toString();
+      }
+
+      goButton.addEventListener("click", async function () {
+	 if (replyInput.disabled == true) {
+	      goButton.innerText = "Send";
+	      replyInput.disabled = false;
+ 	      fetchAccessToken(makeUrl).then(theToken => {
+           	 if (theToken) {
+	            token = theToken;
+                    startChatSession(makeUrl, theToken).then(theSessionData => {
+                       if (theSessionData) {
+		          sessionId = theSessionData.sessionId;
+	    	          nodeLoading.textContent = `${theSessionData.messages[0].message}`;
+            	          head.speakText( nodeLoading.textContent );
+                       }
+                   });
+                }
+             });
+             return;
+         }
+
+         const reply = replyInput.value.trim();
+         if (!reply) {
+	    nodeLoading.textContent = "(Please enter a message)";
+            return;
+         }
+         else
+	    nodeLoading.textContent = "(Thinking ...)";
+
+         try {
+            seqId++;
+	    sendChatMessage(makeUrl, token, sessionId, reply, seqId).then(response => {
+               if (response) {
+ 	    	  nodeLoading.textContent = `${response.messages[0].message}`;
+            	  head.speakText( nodeLoading.textContent );
+               }
+               if ((response.messages.length > 1) && (response.messages[1].type === "SessionEnded")) {
+	          goButton.innerText = "Start";
+	          replyInput.disabled = true;
+               }
+		  
+            });
+         } catch (error) {
+            console.log("Error:", error);
+         }
+	 replyInput.value = "";
+      });
+
+      // Pause animation when document is not visible
+      document.addEventListener("visibilitychange", async function (ev) {
+        if (document.visibilityState === "visible") {
+          head.start();
+        } else {
+          head.stop();
+        }
+      });
+
+      replyInput.addEventListener("keypress", function(event) {
+      // If the user presses the "Enter" key on the keyboard
+         if (event.key === "Enter") {
+            // Cancel the default action, if needed
+            event.preventDefault();
+            // Trigger the button element with a click
+            goButton.click();
+         }
+      });
+
+      window.addEventListener("beforeunload", async function (ez) {
+          endChatSession(token, sessionId).then(endReason => {
+            if (endReason) {
+               console.log("Chat session ended with reason:", endReason);
+            }
+          });
+      });
+
+    });
+
+  </script>
+</head>
+
+<body>
+  <div id="avatar"></div>
+  <div class="input-area">
+    <input type="text" id="reply" placeholder="Type something..." disabled>
+    <div id="loading" class="input-text" style="display: block;"></div>
+    <button id="go">Start</button>
+    <br/><br/><br/>
+  </div>
+</body>
+
+</html>
